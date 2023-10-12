@@ -1,0 +1,10 @@
+encryptionsalt: v1:JrhWTUOHxJc=:v1:jjY4Tqdm2o6JYMhx:4v7kKr8Hcsr6hDqyWvzrEBPMOzR8nA==
+# encryptionsalt: v1:OHGRuVhKP6c=:v1:qH3F5CuUv2uGOFic:WDlOfTVW66HhEkCkuPb0IEoZ/yBZwA==
+config:
+  aws:region: us-west-2
+  iac-pulumi:vpc:
+    availabilityZones:
+      - us-west-2a
+      - us-west-2b
+      - us-west-2c
+    cidrBlock: 10.0.0.0/16
