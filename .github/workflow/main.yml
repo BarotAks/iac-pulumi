@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - 'main'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      mysql:
+        image: mysql:latest
+        env:
+          MYSQL_ROOT_PASSWORD: Pass1234
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v2
+    
+    - name: Set Up Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: 14
+      
+    - name: Install Dependencies
+      run: npm install
+      
+    - name: Run Unit Tests
+      run: npm test:unit
+      
+    - name: Set Up MySQL Database
+      run: |
+        npm run db:migrate
+        npm run db:seed
+      env:
+        DB_HOST: mysql
+        DB_PORT: 3306
+        DB_USER: root
+        DB_PASSWORD: Pass1234
+        DB_NAME: webapp
+      
+    - name: Run Application
+      run: npm start
+      background: true
+      
+    - name: Wait for Application to Start
+      run: sleep 10
+      
+    - name: Run Integration Tests
+      run: npm test:integration
+      env:
+        BASE_URL: http://localhost:4000
+
+    - name: Set Status Checks
+      run: |
+        if [ ${{ job.status }} == "success" ]; then
+          echo "Integration Tests Passed!"
+        else
+          echo "Integration Tests Failed!"
+          exit 1
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

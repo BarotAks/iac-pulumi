@@ -1,82 +1,84 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
-// import * as awsx from "@pulumi/awsx";
 
+interface VpcConfig {
+    cidrBlock: string;
+    availabilityZones: string[];
+}
 
-// // Create an AWS resource (S3 Bucket)
-// const bucket = new aws.s3.Bucket("my-bucket");
+function createVpc(config: VpcConfig): aws.ec2.Vpc {
+    return new aws.ec2.Vpc("my-vpc", {
+        cidrBlock: config.cidrBlock,
+        enableDnsSupport: true,
+        enableDnsHostnames: true,
+        tags: {
+            Name: "MyVPC",
+        },
+    });
+}
 
-// // Export the name of the bucket
-// export const bucketName = bucket.id;
+function createInternetGateway(vpcId: pulumi.Output<string>): aws.ec2.InternetGateway {
+    return new aws.ec2.InternetGateway("myInternetGateway", {
+        vpcId: vpcId,
+        tags: {
+            Name: "MyInternetGateway",
+        },
+    });
+}
 
-const config = new pulumi.Config();
-const region = config.require("config:aws:region");
-const vpcConfig = config.requireObject("config:vpc");
-
-const vpc = new aws.ec2.Vpc("my-vpc", {
-    cidrBlock: vpcConfig.cidrBlock,
-    enableDnsSupport: true,
-    enableDnsHostnames: true,
-    tags: {
-        Name: "MyVPC",
-    },
-});
-
-const createSubnets = (vpcId: string, availabilityZones: string[], isPublic: boolean) => {
+function createSubnets(vpcId: pulumi.Output<string>, availabilityZones: string[], isPublic: boolean): aws.ec2.Subnet[] {
     const subnets: aws.ec2.Subnet[] = [];
 
-    for (let i = 0; i < availabilityZones.length; i++) {
-        const subnet = new aws.ec2.Subnet(`subnet-${isPublic ? 'public' : 'private'}-${i + 1}`, {
-            vpcId: vpcId,
-            availabilityZone: availabilityZones[i],
-            cidrBlock: `10.0.${isPublic ? '1' : '2'}.${i * 16}/28`,
-            mapPublicIpOnLaunch: isPublic,
-            tags: {
-                Name: `My ${isPublic ? 'public' : 'private'} subnet ${i + 1}`,
-            },
+    if (availabilityZones && availabilityZones.length > 0) {
+        availabilityZones.forEach((az, index) => {
+            const subnet = new aws.ec2.Subnet(`subnet-${isPublic ? 'public' : 'private'}-${index + 1}`, {
+                vpcId: vpcId,
+                availabilityZone: az,
+                cidrBlock: `10.0.${isPublic ? '1' : '2'}.${index * 16}/28`,
+                mapPublicIpOnLaunch: isPublic,
+                tags: {
+                    Name: `My ${isPublic ? 'public' : 'private'} subnet ${index + 1}`,
+                },
+            });
+            subnets.push(subnet);
         });
-        subnets.push(subnet);
+    } else {
+        console.error("Availability zones are not defined or empty.");
     }
 
     return subnets;
-};
+}
 
-const publicSubnets = createSubnets(vpc.id, vpcConfig.availabilityZones, true);
-const privateSubnets = createSubnets(vpc.id, vpcConfig.availabilityZones, false);
-
-const internetGateway = new aws.ec2.InternetGateway("igw", {
-    vpcId: vpc.id,
-    tags: {
-        Name: "MyInternetGateway",
-    },
-});
-
-const createRouteTable = (subnets: aws.ec2.Subnet[], isPublic: boolean) => {
+function createRouteTable(vpcId: pulumi.Output<string>, subnets: aws.ec2.Subnet[], isPublic: boolean, internetGateway: aws.ec2.InternetGateway): aws.ec2.RouteTable {
     const routeTable = new aws.ec2.RouteTable(`route-table-${isPublic ? 'public' : 'private'}`, {
-        vpcId: vpc.id,
+        vpcId: vpcId,
         tags: {
             Name: `My ${isPublic ? 'public' : 'private'} route table`,
         },
     });
 
-    const route = new aws.ec2.Route(`route-${isPublic ? 'public' : 'private'}`, {
-        routeTableId: routeTable.id,
-        destinationCidrBlock: "0.0.0.0/0",
-        gatewayId: isPublic ? internetGateway.id : undefined,
-    });
-
-    subnets.forEach((subnet, index) => {
-        new aws.ec2.RouteTableAssociation(`subnet-assoc-${isPublic ? 'public' : 'private'}-${index}`, {
-            subnetId: subnet.id,
-            routeTableId: routeTable.id,
+    if (subnets && subnets.length > 0) {
+        subnets.forEach((subnet, index) => {
+            new aws.ec2.RouteTableAssociation(`subnet-assoc-${isPublic ? 'public' : 'private'}-${index}`, {
+                subnetId: subnet.id,
+                routeTableId: routeTable.id,
+            });
         });
-    });
+    } else {
+        console.error("Subnets are not defined or empty.");
+    }
 
     return routeTable;
-};
+}
 
-const publicRouteTable = createRouteTable(publicSubnets, true);
-const privateRouteTable = createRouteTable(privateSubnets, false);
+const config = new pulumi.Config();
+const vpcConfig: VpcConfig = config.requireObject("vpc");
+
+const vpc = createVpc(vpcConfig);
+const internetGateway = createInternetGateway(vpc.id);
+const publicSubnets = createSubnets(vpc.id, vpcConfig.availabilityZones, true);
+const privateSubnets = createSubnets(vpc.id, vpcConfig.availabilityZones, false);
+const routeTablePublic = createRouteTable(vpc.id, publicSubnets, true, internetGateway);
 
 export const vpcId = vpc.id;
 export const publicSubnetIds = publicSubnets.map(subnet => subnet.id);
