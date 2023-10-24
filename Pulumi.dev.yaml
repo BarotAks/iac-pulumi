@@ -1,9 +1,6 @@
 encryptionsalt: v1:HhXa5MEcpyk=:v1:e6m3Bd0RMhhkl5cG:rid//M6LvsR5ws3KSf4T/d8vFpgj0A==
 config:
   aws:profile: "dev"
-  aws:region: "us-west-2"
-  iac-pulumi:vpc:
-    cidrBlock: "10.0.0.0/16"
-    availabilityZones:
-      - "us-west-2a"
-      - "us-west-2b"
+  aws:region: "us-east-1"
+  vpcCidrBlock: "10.0.0.0/16"
+
