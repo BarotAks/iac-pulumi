@@ -1,34 +1,43 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
-// import * as awsx from "@pulumi/awsx";
 
+interface VpcConfig {
+    cidrBlock: string;
+}
 
-// // Create an AWS resource (S3 Bucket)
-// const bucket = new aws.s3.Bucket("my-bucket");
+async function createVpc(config: VpcConfig): Promise<aws.ec2.Vpc> {
+    const vpc = new aws.ec2.Vpc("my-vpc", {
+        cidrBlock: config.cidrBlock,
+        enableDnsSupport: true,
+        enableDnsHostnames: true,
+        tags: {
+            Name: "MyVPC",
+        },
+    });
 
-// // Export the name of the bucket
-// export const bucketName = bucket.id;
+    return vpc;
+}
 
 const config = new pulumi.Config();
-const region = config.require("config:aws:region");
-const vpcConfig = config.requireObject("config:vpc");
+const vpcConfig: VpcConfig = {
+    cidrBlock: config.require("vpcCidrBlock"),
+};
 
-const vpc = new aws.ec2.Vpc("my-vpc", {
-    cidrBlock: vpcConfig.cidrBlock,
-    enableDnsSupport: true,
-    enableDnsHostnames: true,
-    tags: {
-        Name: "MyVPC",
-    },
+const vpc = createVpc(vpcConfig);
+
+const availabilityZones = await aws.getAvailabilityZones({
+    state: "available",
 });
 
-const createSubnets = (vpcId: string, availabilityZones: string[], isPublic: boolean) => {
+const numAZs = availabilityZones.names.length;
+
+const createSubnets = (vpcId: pulumi.Output<string>, isPublic: boolean): aws.ec2.Subnet[] => {
     const subnets: aws.ec2.Subnet[] = [];
 
-    for (let i = 0; i < availabilityZones.length; i++) {
+    for (let i = 0; i < numAZs; i++) {
         const subnet = new aws.ec2.Subnet(`subnet-${isPublic ? 'public' : 'private'}-${i + 1}`, {
             vpcId: vpcId,
-            availabilityZone: availabilityZones[i],
+            availabilityZone: availabilityZones.names[i],
             cidrBlock: `10.0.${isPublic ? '1' : '2'}.${i * 16}/28`,
             mapPublicIpOnLaunch: isPublic,
             tags: {
@@ -41,43 +50,71 @@ const createSubnets = (vpcId: string, availabilityZones: string[], isPublic: boo
     return subnets;
 };
 
-const publicSubnets = createSubnets(vpc.id, vpcConfig.availabilityZones, true);
-const privateSubnets = createSubnets(vpc.id, vpcConfig.availabilityZones, false);
+const publicSubnets = createSubnets(vpc.id, true);
+const privateSubnets = createSubnets(vpc.id, false);
 
-const internetGateway = new aws.ec2.InternetGateway("igw", {
+const appSecurityGroup = new aws.ec2.SecurityGroup("app-security-group", {
     vpcId: vpc.id,
+    ingress: [
+        {
+            protocol: "tcp",
+            fromPort: 22,
+            toPort: 22,
+            cidrBlocks: ["0.0.0.0/0"], // Allow SSH from anywhere
+        },
+        {
+            protocol: "tcp",
+            fromPort: 80,
+            toPort: 80,
+            cidrBlocks: ["0.0.0.0/0"], // Allow HTTP from anywhere
+        },
+        {
+            protocol: "tcp",
+            fromPort: 443,
+            toPort: 443,
+            cidrBlocks: ["0.0.0.0/0"], // Allow HTTPS from anywhere
+        },
+        {
+            protocol: "tcp",
+            fromPort: 4000, // Allow traffic on port 4000 (application port)
+            toPort: 4000, // Allow traffic on port 4000 (application port)
+            cidrBlocks: ["0.0.0.0/0"], // Allow traffic on port 4000 from anywhere
+        },
+    ],
+    egress: [
+        {
+            protocol: "-1",
+            fromPort: 0,
+            toPort: 0,
+            cidrBlocks: ["0.0.0.0/0"], // Allow all outbound traffic
+        },
+    ],
     tags: {
-        Name: "MyInternetGateway",
+        Name: "AppSecurityGroup",
     },
 });
 
-const createRouteTable = (subnets: aws.ec2.Subnet[], isPublic: boolean) => {
-    const routeTable = new aws.ec2.RouteTable(`route-table-${isPublic ? 'public' : 'private'}`, {
-        vpcId: vpc.id,
-        tags: {
-            Name: `My ${isPublic ? 'public' : 'private'} route table`,
-        },
-    });
-
-    const route = new aws.ec2.Route(`route-${isPublic ? 'public' : 'private'}`, {
-        routeTableId: routeTable.id,
-        destinationCidrBlock: "0.0.0.0/0",
-        gatewayId: isPublic ? internetGateway.id : undefined,
-    });
-
-    subnets.forEach((subnet, index) => {
-        new aws.ec2.RouteTableAssociation(`subnet-assoc-${isPublic ? 'public' : 'private'}-${index}`, {
-            subnetId: subnet.id,
-            routeTableId: routeTable.id,
-        });
-    });
-
-    return routeTable;
-};
-
-const publicRouteTable = createRouteTable(publicSubnets, true);
-const privateRouteTable = createRouteTable(privateSubnets, false);
+const instance = new aws.ec2.Instance("my-instance", {
+    ami: "ami-0e7850184e9e201bd", // Replace with your custom AMI ID
+    instanceType: "t2.micro", // Specify the desired instance type
+    subnetId: privateSubnets[0].id, // Launch in the first private subnet
+    securityGroups: [appSecurityGroup.name], // Attach the application security group
+    rootBlockDevice: {
+        volumeSize: 25,
+        volumeType: "gp2",
+        deleteOnTermination: true,
+    },
+    disableApiTermination: false,
+    tags: {
+        Name: "MyEC2Instance",
+    },
+});
 
 export const vpcId = vpc.id;
 export const publicSubnetIds = publicSubnets.map(subnet => subnet.id);
 export const privateSubnetIds = privateSubnets.map(subnet => subnet.id);
+export const publicRouteTableId = publicRouteTable.id;
+export const privateRouteTableId = privateRouteTable.id;
+export const appSecurityGroupId = appSecurityGroup.id;
+export const instanceId = instance.id;
+
