@@ -25,3 +25,4 @@ This repository contains code and instructions for setting up networking resourc
 5. **CleanUp Resources**
     ```sh
     pulumi destroy
+    
