@@ -13,7 +13,7 @@ jobs:
       mysql:
         image: mysql:latest
         env:
-          MYSQL_ROOT_PASSWORD: Pass1234
+          MYSQL_ROOT_PASSWORD: root
         ports:
           - 3306:3306
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
@@ -41,7 +41,7 @@ jobs:
         DB_HOST: mysql
         DB_PORT: 3306
         DB_USER: root
-        DB_PASSWORD: Pass1234
+        DB_PASSWORD: root
         DB_NAME: webapp
       
     - name: Run Application
@@ -54,7 +54,7 @@ jobs:
     - name: Run Integration Tests
       run: npm test:integration
       env:
-        BASE_URL: http://localhost:4000
+        BASE_URL: http://localhost:3000
 
     - name: Set Status Checks
       run: |

@@ -188,11 +188,11 @@ const appSecurityGroup = new aws.ec2.SecurityGroup("app-sg", {
             toPort: 443,
             cidrBlocks:[publicCidrBlockName]
         },
-        // Replace 4000 with the port your application runs on
+        // Replace 3000 with the port your application runs on
         {
             protocol: "tcp",
-            fromPort: 4000,
-            toPort: 4000,
+            fromPort: 3000,
+            toPort: 3000,
             cidrBlocks: [publicCidrBlockName]
         }
     ],
