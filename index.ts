@@ -215,30 +215,86 @@ export const publicSubnetIds = subnets.apply(subnets =>
 export const privateSubnetIds = subnets.apply(subnets => 
     subnets.filter((_, index) => index % 2 !== 0).map(subnet => subnet.id)
 );
-// Create an EC2 instance
+
+// Create RDS parameter group
+const dbParameterGroup = new aws.rds.ParameterGroup("db-parameter-group", {
+    family: "mariadb10.4", // Specify your database family
+    parameters: {
+        // Define your custom parameters here if necessary
+    },
+});
+
+// Create RDS instance (MariaDB)
+const rdsInstance = new aws.rds.Instance("mydb", {
+    allocatedStorage: 20,
+    storageType: "gp2",
+    engine: "mariadb",
+    engineVersion: "10.4", // Specify your desired MariaDB version
+    instanceClass: "db.t2.micro", // Use the appropriate instance class
+    name: "csye6225", // Database name
+    username: "csye6225",
+    password: "Pass1234", // Replace with a strong password
+    skipFinalSnapshot: true,
+    publiclyAccessible: false,
+    vpcSecurityGroupIds: [appSecurityGroup.id],
+    allocatedStorage: 20,
+    storageType: "gp2",
+    dbSubnetGroupName: dbSubnetGroup.name,
+    skipFinalSnapshot: true,
+    parameterGroupName: dbParameterGroup.name,
+});
+
+// Security Group Rules: Allow EC2 to connect to MariaDB
+appSecurityGroup.createIngressRule("allow-db", {
+    type: "ingress",
+    fromPort: 3306,
+    toPort: 3306,
+    protocol: "tcp",
+    cidrBlocks: [aws.ec2.getPrivateIp({})], // Get private IP of EC2 instance
+});
+
+
+// Create an EC2 instance with User Data and Systemd Unit Setup
 const ec2Instance = new aws.ec2.Instance("web-app-instance", {
     ami: "ami-00e5b41d2127eabf5",
     instanceType: "t2.micro",
-    vpcSecurityGroupIds: [appSecurityGroup.id],  // attach application security group
-    subnetId: pulumi.output(publicSubnetIds[0]),  // specify one of the public subnets
+    vpcSecurityGroupIds: [appSecurityGroup.id],
+    subnetId: pulumi.output(publicSubnetIds[0]),
     associatePublicIpAddress: true,
-    keyName: keyPair, 
-    disableApiTermination: false,  // allows the instance to be terminated
+    keyName: keyPair,
+    disableApiTermination: false,
     rootBlockDevice: {
-        deleteOnTermination: true,  // ensure the EBS volume is deleted upon termination
-        volumeSize: 25, // set the root volume size to 25 GB
-        volumeType: "gp2", // set the root volume type to General Purpose SSD (GP2)
+        deleteOnTermination: true,
+        volumeSize: 25,
+        volumeType: "gp2",
     },
+    userData: pulumi.interpolate `#!/bin/bash
+        export DB_HOSTNAME=${rdsInstance.endpoint};
+        export DB_USERNAME=csye6225;
+        export DB_PASSWORD=<YOUR_DB_PASSWORD>; // Replace with your MariaDB password
+        # Additional configuration and startup commands for your application
+        # ...
+        # Start your application here
+    `,
     tags: {
         Name: "web-app-instance",
     },
-}, { dependsOn: publicSubnets}); 
+}, { dependsOn: publicSubnets });
 
+// Systemd Unit Setup
+const systemdServiceUnit = new aws.ec2.CloudInit("systemd-service", {
+    instanceId: ec2Instance.id,
+    userDataBase64: ec2Instance.userData.apply(userData => 
+        Buffer.from(userData).toString("base64")),
+});
 
-// Export the security group ID
+// Output RDS endpoint and EC2 public IP
+export const rdsEndpoint = rdsInstance.endpoint;
+export const ec2PublicIp = ec2Instance.publicIp;
+
+// Export the security group ID, internet gateway ID, route table IDs, and public IP
 export const securityGroupId = appSecurityGroup.id;
 export const internetGatewayId = internetGateway.id;
 export const publicRouteTableId = publicRouteTable.id;
 export const privateRouteTableId = privateRouteTable.id;
-// Export the public IP of the instance
 export const publicIp = ec2Instance.publicIp;
