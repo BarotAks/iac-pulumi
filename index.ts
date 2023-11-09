@@ -351,7 +351,7 @@ sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
 -s
 
 # Restart the application service
-sudo systemctl restart webapp.service
+# sudo systemctl restart webapp.service
 `;
 });
 

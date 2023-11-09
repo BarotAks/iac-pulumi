@@ -2,7 +2,7 @@ encryptionsalt: v1:tdfYIRWH9Og=:v1:OkRNpezwn2FPt82u:FGxwM4Wp3VMyG/+H0kN4bg7HvMwe
 config:
   aws:profile: "demo"
   aws:region: "us-east-1"
-  myfirstpulumi:amiId: "ami-06ea007fe6afeba89" # Specify your desired AMI ID
+  myfirstpulumi:amiId: "ami-05983800fea519bc7" # Specify your desired AMI ID
   myfirstpulumi:dbName: "csye6225"
   myfirstpulumi:dbPassword: "root1234"
   myfirstpulumi:dbUsername: "csye6225"
