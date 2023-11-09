@@ -1,4 +1,24 @@
+encryptionsalt: v1:tdfYIRWH9Og=:v1:OkRNpezwn2FPt82u:FGxwM4Wp3VMyG/+H0kN4bg7HvMwefA==
 config:
-  aws:profile: dev
-  aws:region: "us-east-2"
+  aws:profile: "demo"
+  aws:region: "us-east-1"
+  myfirstpulumi:amiId: "ami-06ea007fe6afeba89" # Specify your desired AMI ID
+  myfirstpulumi:dbName: "csye6225"
+  myfirstpulumi:dbPassword: "root1234"
+  myfirstpulumi:dbUsername: "csye6225"
+  myfirstpulumi:engine: "mariadb"
+  myfirstpulumi:engineVersion: "10.5"
+  myfirstpulumi:identifier: "csye6225"
+  myfirstpulumi:instanceClass: "db.t2.micro"
+  myfirstpulumi:internetGatewayName: "MyInternetGateway"
+  myfirstpulumi:keyPair: "Mykey" # Specify the name of your EC2 key pair
+  myfirstpulumi:parameterGroupName: "csye6225pg"
+  myfirstpulumi:privateRouteTableName: "MyPrivateRouteTable"
+  myfirstpulumi:publicCidrBlockName: "0.0.0.0/0"
+  myfirstpulumi:publicRouteTableName: "MyPublicRouteTable"
+  myfirstpulumi:storageType: "gp2"  
+  myfirstpulumi:subnetMask: "24" # Specify the subnet mask for your subnets
   myfirstpulumi:vpcCidrBlock: "10.0.0.0/16"
+  myfirstpulumi:vpcName: "MyVPC"
+  myfirstpulumi:domainName: "demo.f23cloud.me"
+  myfirstpulumi:hostedZoneId: "Z05004432YBDRSPRH0XO5"
