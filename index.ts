@@ -221,6 +221,80 @@ const appSecurityGroup = new aws.ec2.SecurityGroup("app-sg", {
     ],
 });
 
+// Create Load Balancer Security Group
+const lbSecurityGroup = new aws.ec2.SecurityGroup("lb-sg", {
+    vpcId: vpc.id,
+    description: "Load Balancer Security Group",
+    ingress: [
+        // Allow HTTP (80) traffic from anywhere
+        {
+            protocol: "tcp",
+            fromPort: 80,
+            toPort: 80,
+            cidrBlocks: ["0.0.0.0/0"]
+        },
+        // Allow HTTPS (443) traffic from anywhere
+        {
+            protocol: "tcp",
+            fromPort: 443,
+            toPort: 443,
+            cidrBlocks: ["0.0.0.0/0"]
+        },
+    ],
+    egress: [
+        // Allow all outgoing traffic
+        {
+            protocol: "-1",
+            fromPort: 0,
+            toPort: 0,
+            cidrBlocks: ["0.0.0.0/0"]
+        }
+    ],
+});
+
+// Update App Security Group
+appSecurityGroup.ingress.apply(ingress => [
+    ...ingress,
+    // Allow TCP traffic on ports 22 and your application port from the load balancer security group
+    {
+        protocol: "tcp",
+        fromPort: 22,
+        toPort: 22,
+        securityGroups: [lbSecurityGroup.id]
+    },
+    {
+        protocol: "tcp",
+        fromPort: 3000, // Replace with your application port
+        toPort: 3000,   // Replace with your application port
+        securityGroups: [lbSecurityGroup.id]
+    },
+]);
+
+// Restrict access to the instance from the internet
+appSecurityGroup.ingress.apply(ingress => [
+    ...ingress,
+    {
+        protocol: "tcp",
+        fromPort: 80,
+        toPort: 80,
+        cidrBlocks: ["0.0.0.0/0"],
+        // Uncomment the line below to restrict access to the instance from the internet
+        revoke: true
+    },
+    {
+        protocol: "tcp",
+        fromPort: 443,
+        toPort: 443,
+        cidrBlocks: ["0.0.0.0/0"],
+        // Uncomment the line below to restrict access to the instance from the internet
+        revoke: true
+    },
+]);
+
+
+// Export the ID of the load balancer security group
+export const lbSecurityGroupId = lbSecurityGroup.id;
+
 // Create an EC2 security group for RDS instances
 const rdsSecurityGroup = new aws.ec2.SecurityGroup("rds-sg", {
     vpcId: vpc.id,
@@ -319,13 +393,13 @@ const dbInstance = new aws.rds.Instance("mydbinstance", {
 
 }, { provider });
 
-const userData = pulumi.all([dbInstance.endpoint, dbUsername, dbPassword,databaseName]).apply(([endpoint, username, password,databaseName]) => {
+const userData = pulumi.all([dbInstance.endpoint, dbUsername, dbPassword, databaseName]).apply(([endpoint, username, password, databaseName]) => {
     const parts = endpoint.split(':');
     const endpoint_host = parts[0];
     const dbPort = parts[1];
-    
+
     // Create the bash script string
-    return `#!/bin/bash
+    const userDataScript = `#!/bin/bash
 ENV_FILE="/home/admin/webapp/.env"
 
 # Create or overwrite the environment file with the environment variables
@@ -345,15 +419,21 @@ sudo chmod 600 $ENV_FILE
 
 # Fetch configurations using CloudWatch Agent
 sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
--a fetch-config \
--m ec2 \
--c file:/home/admin/webapp/packer/cloudwatch-config.json \
--s
+  -a fetch-config \
+  -m ec2 \
+  -c file:/home/admin/webapp/packer/cloudwatch-config.json \
+  -s
 
 # Restart the application service
 # sudo systemctl restart webapp.service
 `;
+
+    // Encode the user data using base64
+    const base64EncodedUserData = Buffer.from(userDataScript).toString('base64');
+
+    return base64EncodedUserData;
 });
+
 
 
 // Create an EC2 instance
@@ -389,6 +469,85 @@ const domainRecord = new aws.route53.Record(`${domainName}-record`, {
     records: [ec2InstancePublicIp],
 });
 
+// Define Launch Template for EC2 instances
+const launchTemplate = new aws.ec2.LaunchTemplate("web-app-launch-template", {
+    imageId: amiId, // Your custom AMI
+    instanceType: "t2.micro",
+    keyName: keyPair,
+    userData: userData,
+    securityGroupNames: [appSecurityGroup.name], // WebAppSecurityGroup
+});
+
+// Define Auto Scaling Group
+const autoScalingGroup = new aws.autoscaling.Group("web-app-auto-scaling-group", {
+    vpcZoneIdentifiers: pulumi.output(subnets).apply(subnets => subnets.map(subnet => subnet.vpcId)),  // Pass the array directly
+    launchTemplate: {
+        id: launchTemplate.id,
+        version: "$Latest",
+    },
+    minSize: 1,
+    maxSize: 3,
+    desiredCapacity: 1,
+    healthCheckType: "EC2",
+    healthCheckGracePeriod: 300, // 300 seconds (default)
+    forceDelete: true,
+    tags: [
+        {
+            key: "Name",
+            value: "web-app-instance",
+            propagateAtLaunch: true,
+        },
+        // Add other tags as needed
+    ],
+    waitForCapacityTimeout: "0s", // No waiting for capacity
+});
+
+
+
+const scaleUpPolicy = new aws.autoscaling.Policy("web-app-scale-up-policy", {
+    scalingAdjustment: 1,
+    adjustmentType: "ChangeInCapacity",
+    cooldown: 60,
+    autoscalingGroupName: autoScalingGroup.name,  // Use autoscalingGroupName instead of autoScalingGroupName
+});
+
+const scaleDownPolicy = new aws.autoscaling.Policy("web-app-scale-down-policy", {
+    scalingAdjustment: -1,
+    adjustmentType: "ChangeInCapacity",
+    cooldown: 60,
+    autoscalingGroupName: autoScalingGroup.name,  // Use autoscalingGroupName instead of autoScalingGroupName
+});
+
+
+// Define CloudWatch alarms for scaling policies
+const scaleUpAlarm = new aws.cloudwatch.MetricAlarm("web-app-scale-up-alarm", {
+    comparisonOperator: "GreaterThanThreshold",
+    evaluationPeriods: 1,
+    metricName: "CPUUtilization",
+    namespace: "AWS/EC2",
+    period: 60,
+    threshold: 5,
+    statistic: "Average",
+    dimensions: {
+        AutoScalingGroupName: autoScalingGroup.name,
+    },
+    alarmActions: [scaleUpPolicy.arn],
+});
+
+const scaleDownAlarm = new aws.cloudwatch.MetricAlarm("web-app-scale-down-alarm", {
+    comparisonOperator: "LessThanThreshold",
+    evaluationPeriods: 1,
+    metricName: "CPUUtilization",
+    namespace: "AWS/EC2",
+    period: 60,
+    threshold: 3,
+    statistic: "Average",
+    dimensions: {
+        AutoScalingGroupName: autoScalingGroup.name,
+    },
+    alarmActions: [scaleDownPolicy.arn],
+});
+
 // Export the security group ID
 export const securityGroupId = appSecurityGroup.id;
 export const internetGatewayId = internetGateway.id;
@@ -402,3 +561,10 @@ export const rdsSecurityGroupId = rdsSecurityGroup.id;
 export const domainRecordName = domainRecord.name;
 export const domainRecordType = domainRecord.type;
 export const domainRecordValue = domainRecord.records;
+// Export Auto Scaling Group details
+export const autoScalingGroupName = autoScalingGroup.name;
+export const autoScalingGroupDesiredCapacity = autoScalingGroup.desiredCapacity;
+export const autoScalingGroupMinSize = autoScalingGroup.minSize;
+export const autoScalingGroupMaxSize = autoScalingGroup.maxSize;
+
+
