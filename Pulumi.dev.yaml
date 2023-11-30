@@ -1,17 +1,17 @@
-encryptionsalt: v1:sJ3Lc0SAfF4=:v1:OD5AuWnFIJdiohxW:gW85K9TzgDnY2uxB+QHQHO1D7qbrVA==
+encryptionsalt: v1:tdfYIRWH9Og=:v1:OkRNpezwn2FPt82u:FGxwM4Wp3VMyG/+H0kN4bg7HvMwefA==
 config:
-  aws:profile: "dev"
+  aws:profile: "demo"
   aws:region: "us-east-1"
-  myfirstpulumi:amiId: "ami-0e27cafad329a0a58" # Specify your desired AMI ID
+  myfirstpulumi:amiId: "ami-05983800fea519bc7" # Specify your desired AMI ID
   myfirstpulumi:dbName: "csye6225"
-  myfirstpulumi:dbPassword: "root"
-  myfirstpulumi:dbUsername: "root"
+  myfirstpulumi:dbPassword: "root1234"
+  myfirstpulumi:dbUsername: "csye6225"
   myfirstpulumi:engine: "mariadb"
   myfirstpulumi:engineVersion: "10.5"
   myfirstpulumi:identifier: "csye6225"
   myfirstpulumi:instanceClass: "db.t2.micro"
   myfirstpulumi:internetGatewayName: "MyInternetGateway"
-  myfirstpulumi:keyPair: "MyKeypair" # Specify the name of your EC2 key pair
+  myfirstpulumi:keyPair: "Mykey" # Specify the name of your EC2 key pair
   myfirstpulumi:parameterGroupName: "csye6225pg"
   myfirstpulumi:privateRouteTableName: "MyPrivateRouteTable"
   myfirstpulumi:publicCidrBlockName: "0.0.0.0/0"
@@ -20,3 +20,9 @@ config:
   myfirstpulumi:subnetMask: "24" # Specify the subnet mask for your subnets
   myfirstpulumi:vpcCidrBlock: "10.0.0.0/16"
   myfirstpulumi:vpcName: "MyVPC"
+  myfirstpulumi:domainName: "demo.f23cloud.me"
+  myfirstpulumi:hostedZoneId: "Z05004432YBDRSPRH0XO5"
+  myfirstpulumi:mailgunDomain: "f23cloud.me"
+  myfirstpulumi:mailgunApiKey: "516c85648c378e36f8e48b908239f8f2-30b58138-6cbb07b9"
+  myfirstpulumi:mailgunSenderEmail: "postmaster@f23cloud.me"
+  gcp:project: "dark-torch-406505"

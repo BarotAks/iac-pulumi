@@ -1,14 +1,14 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
 import * as crypto from "crypto";
-
-
+import * as alb from "@pulumi/aws/alb";
+import * as route53 from "@pulumi/aws/route53";
+import * as gcp from "@pulumi/gcp";
+import * as mailgun from "@pulumi/mailgun";
 
 // Load configurations
 const config = new pulumi.Config("myfirstpulumi");
 const awsConfig = new pulumi.Config("aws");
-
-
 
 // Get the AWS profile from the config
 const awsProfile = awsConfig.require("profile");
@@ -37,6 +37,10 @@ const dbPassword = config.requireSecret("dbPassword");
 const domainName = config.require("domainName");
 const hostedZoneId = config.require("hostedZoneId");
 
+// Define Mailgun configuration
+const mailgunDomain = config.require("mailgunDomain");
+const mailgunApiKey = config.requireSecret("mailgunApiKey");
+const mailgunSenderEmail = config.require("mailgunSenderEmail");
 
 // Declare separate arrays for public and private subnets
 const publicSubnets: aws.ec2.Subnet[] = [];
@@ -176,50 +180,50 @@ subnets.apply(subnetArray =>
     )
 );
 
-// Create an EC2 security group for web applications
-const appSecurityGroup = new aws.ec2.SecurityGroup("app-sg", {
-    vpcId: vpc.id,
-    description: "Application Security Group",
-    ingress: [
-        // Allow SSH (22) traffic 
-        {
-            protocol: "tcp",
-            fromPort: 22,
-            toPort: 22,
-            cidrBlocks: [publicCidrBlockName]
-        },
-        // Allow HTTP (80) traffic
-        {
-            protocol: "tcp",
-            fromPort: 80,
-            toPort: 80,
-            cidrBlocks: [publicCidrBlockName]
-        },
-        // Allow HTTPS (443) traffic 
-        {
-            protocol: "tcp",
-            fromPort: 443,
-            toPort: 443,
-            cidrBlocks:[publicCidrBlockName]
-        },
-        // Replace 3000 with the port your application runs on
-        {
-            protocol: "tcp",
-            fromPort: 3000,
-            toPort: 3000,
-            cidrBlocks: [publicCidrBlockName]
-        }
-    ],
-    egress: [
-        // Allow all outgoing traffic
-        {
-            protocol: "-1",
-            fromPort: 0,
-            toPort: 0,
-            cidrBlocks: [publicCidrBlockName]
-        }
-    ],
-});
+// // Create an EC2 security group for web applications
+// const appSecurityGroup = new aws.ec2.SecurityGroup("app-sg", {
+//     vpcId: vpc.id,
+//     description: "Application Security Group",
+//     ingress: [
+//         // Allow SSH (22) traffic 
+//         {
+//             protocol: "tcp",
+//             fromPort: 22,
+//             toPort: 22,
+//             cidrBlocks: [publicCidrBlockName]
+//         },
+//         // Allow HTTP (80) traffic
+//         {
+//             protocol: "tcp",
+//             fromPort: 80,
+//             toPort: 80,
+//             cidrBlocks: [publicCidrBlockName]
+//         },
+//         // Allow HTTPS (443) traffic 
+//         {
+//             protocol: "tcp",
+//             fromPort: 443,
+//             toPort: 443,
+//             cidrBlocks:[publicCidrBlockName]
+//         },
+//         // Replace 3000 with the port your application runs on
+//         {
+//             protocol: "tcp",
+//             fromPort: 3000,
+//             toPort: 3000,
+//             cidrBlocks: [publicCidrBlockName]
+//         }
+//     ],
+//     egress: [
+//         // Allow all outgoing traffic
+//         {
+//             protocol: "-1",
+//             fromPort: 0,
+//             toPort: 0,
+//             cidrBlocks: [publicCidrBlockName]
+//         }
+//     ],
+// });
 
 // Create Load Balancer Security Group
 const lbSecurityGroup = new aws.ec2.SecurityGroup("lb-sg", {
@@ -252,10 +256,40 @@ const lbSecurityGroup = new aws.ec2.SecurityGroup("lb-sg", {
     ],
 });
 
-// Update App Security Group
+const appSecurityGroup = new aws.ec2.SecurityGroup("app-sg", {
+    vpcId: vpc.id,
+    description: "Application Security Group",
+    ingress: [
+        // Allow SSH (22) traffic
+        {
+            protocol: "tcp",
+            fromPort: 22,
+            toPort: 22,
+            securityGroups: [lbSecurityGroup.id]
+        },
+        // Allow your application port (replace 3000 with your actual application port)
+        {
+            protocol: "tcp",
+            fromPort: 3000,
+            toPort: 3000,
+            securityGroups: [lbSecurityGroup.id]
+        },
+    ],
+    egress: [
+        // Allow all outgoing traffic
+        {
+            protocol: "-1",
+            fromPort: 0,
+            toPort: 0,
+            cidrBlocks: ["0.0.0.0/0"]
+        }
+    ],
+});
+
 appSecurityGroup.ingress.apply(ingress => [
-    ...ingress,
-    // Allow TCP traffic on ports 22 and your application port from the load balancer security group
+    // Remove existing HTTP and HTTPS rules
+    ...ingress.filter(rule => rule.fromPort !== 80 && rule.fromPort !== 443),
+    // Add the new rules for SSH and your application port
     {
         protocol: "tcp",
         fromPort: 22,
@@ -270,26 +304,45 @@ appSecurityGroup.ingress.apply(ingress => [
     },
 ]);
 
-// Restrict access to the instance from the internet
-appSecurityGroup.ingress.apply(ingress => [
-    ...ingress,
-    {
-        protocol: "tcp",
-        fromPort: 80,
-        toPort: 80,
-        cidrBlocks: ["0.0.0.0/0"],
-        // Uncomment the line below to restrict access to the instance from the internet
-        revoke: true
-    },
-    {
-        protocol: "tcp",
-        fromPort: 443,
-        toPort: 443,
-        cidrBlocks: ["0.0.0.0/0"],
-        // Uncomment the line below to restrict access to the instance from the internet
-        revoke: true
-    },
-]);
+
+// // Update App Security Group
+// appSecurityGroup.ingress.apply(ingress => [
+//     ...ingress,
+//     // Allow TCP traffic on ports 22 and your application port from the load balancer security group
+//     {
+//         protocol: "tcp",
+//         fromPort: 22,
+//         toPort: 22,
+//         securityGroups: [lbSecurityGroup.id]
+//     },
+//     // {
+//     //     protocol: "tcp",
+//     //     fromPort: 3000, // Replace with your application port
+//     //     toPort: 3000,   // Replace with your application port
+//     //     securityGroups: [lbSecurityGroup.id]
+//     // },
+// ]);
+
+// // Restrict access to the instance from the internet
+// appSecurityGroup.ingress.apply(ingress => [
+//     ...ingress.filter(rule => rule.fromPort !== 80 && rule.fromPort !== 443),  // Remove existing HTTP and HTTPS rules
+//     // {
+//     //     protocol: "tcp",
+//     //     fromPort: 80,
+//     //     toPort: 80,
+//     //     cidrBlocks: ["0.0.0.0/0"],
+//     //     // Uncomment the line below to restrict access to the instance from the internet
+//     //     revoke: true
+//     // },
+//     // {
+//     //     protocol: "tcp",
+//     //     fromPort: 443,
+//     //     toPort: 443,
+//     //     cidrBlocks: ["0.0.0.0/0"],
+//     //     // Uncomment the line below to restrict access to the instance from the internet
+//     //     revoke: true
+//     // },
+// ]);
 
 
 // Export the ID of the load balancer security group
@@ -393,7 +446,63 @@ const dbInstance = new aws.rds.Instance("mydbinstance", {
 
 }, { provider });
 
-const userData = pulumi.all([dbInstance.endpoint, dbUsername, dbPassword, databaseName]).apply(([endpoint, username, password, databaseName]) => {
+// const userData = pulumi.all([dbInstance.endpoint, dbUsername, dbPassword, databaseName]).apply(([endpoint, username, password, databaseName]) => {
+//     const parts = endpoint.split(':');
+//     const endpoint_host = parts[0];
+//     const dbPort = parts[1];
+
+//     // Create the bash script string
+//     const userDataScript = `#!/bin/bash
+// ENV_FILE="/home/admin/webapp/.env"
+
+// # Create or overwrite the environment file with the environment variables
+// echo "DB_HOST=${endpoint_host}" > $ENV_FILE
+// echo "DBPORT=${dbPort}" >> $ENV_FILE
+// echo "DB_USERNAME=${username}" >> $ENV_FILE
+// echo "DB_PASSWORD=${password}" >> $ENV_FILE
+// echo "DB_DATABASE=${databaseName}" >> $ENV_FILE
+// echo "CSV_PATH=/home/admin/webapp/users.csv" >> $ENV_FILE
+// echo "PORT=3000" >> $ENV_FILE
+
+// # Optionally, you can change the owner and group of the file if needed
+// sudo chown admin:admin $ENV_FILE
+
+// # Adjust the permissions of the environment file
+// sudo chmod 600 $ENV_FILE
+
+// # Fetch configurations using CloudWatch Agent
+// sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+//   -a fetch-config \
+//   -m ec2 \
+//   -c file:/home/admin/webapp/packer/cloudwatch-config.json \
+//   -s
+
+// # Restart the application service
+// # sudo systemctl restart webapp.service
+// `;
+
+//     // Encode the user data using base64
+//     const base64EncodedUserData = Buffer.from(userDataScript).toString('base64');
+
+//     return base64EncodedUserData;
+// });
+
+// Create an SNS topic
+const snsTopic = new aws.sns.Topic("webAppSnsTopic", {
+    displayName: "WebAppSnsTopic",
+});
+
+// Get the ARN of the SNS topic
+const snsTopicArn = snsTopic.arn;
+
+// Update the user data script to include SNS topic information
+const userData = pulumi.all([
+    dbInstance.endpoint,
+    dbUsername,
+    dbPassword,
+    databaseName,
+    snsTopicArn, // Include SNS topic ARN in user data
+]).apply(([endpoint, username, password, databaseName, snsTopicArn]) => {
     const parts = endpoint.split(':');
     const endpoint_host = parts[0];
     const dbPort = parts[1];
@@ -408,23 +517,24 @@ echo "DBPORT=${dbPort}" >> $ENV_FILE
 echo "DB_USERNAME=${username}" >> $ENV_FILE
 echo "DB_PASSWORD=${password}" >> $ENV_FILE
 echo "DB_DATABASE=${databaseName}" >> $ENV_FILE
+echo "SNS_TOPIC_ARN=${snsTopicArn}" >> $ENV_FILE // Include SNS topic ARN in the environment file
 echo "CSV_PATH=/home/admin/webapp/users.csv" >> $ENV_FILE
 echo "PORT=3000" >> $ENV_FILE
 
-# Optionally, you can change the owner and group of the file if needed
+// Optionally, you can change the owner and group of the file if needed
 sudo chown admin:admin $ENV_FILE
 
-# Adjust the permissions of the environment file
+// Adjust the permissions of the environment file
 sudo chmod 600 $ENV_FILE
 
-# Fetch configurations using CloudWatch Agent
+// Fetch configurations using CloudWatch Agent
 sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
   -a fetch-config \
   -m ec2 \
   -c file:/home/admin/webapp/packer/cloudwatch-config.json \
   -s
 
-# Restart the application service
+// Restart the application service
 # sudo systemctl restart webapp.service
 `;
 
@@ -435,13 +545,12 @@ sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
 });
 
 
-
 // Create an EC2 instance
 const ec2Instance = new aws.ec2.Instance("web-app-instance", {
     ami: amiId,
     instanceType: "t2.micro",
     vpcSecurityGroupIds: [appSecurityGroup.id],  // attach application security group
-    subnetId: pulumi.output(publicSubnetIds[0]),  // specify one of the public subnets
+    subnetId: publicSubnetIds[0].apply(id => id),    // specify one of the public subnets
     associatePublicIpAddress: true,
     keyName: keyPair, 
     disableApiTermination: false,  // allows the instance to be terminated
@@ -460,14 +569,14 @@ const ec2Instance = new aws.ec2.Instance("web-app-instance", {
 // Get the public IP address of the EC2 instance
 const ec2InstancePublicIp = ec2Instance.publicIp;
 
-// Create a Route53 Record Set for the domain
-const domainRecord = new aws.route53.Record(`${domainName}-record`, {
-    zoneId: hostedZoneId,
-    name: domainName,
-    type: "A",
-    ttl: 60,
-    records: [ec2InstancePublicIp],
-});
+// // Create a Route53 Record Set for the domain
+// const domainRecord = new aws.route53.Record(`${domainName}-record`, {
+//     zoneId: hostedZoneId,
+//     name: domainName,
+//     type: "A",
+//     ttl: 60,
+//     records: [ec2InstancePublicIp],
+// });
 
 // Define Launch Template for EC2 instances
 const launchTemplate = new aws.ec2.LaunchTemplate("web-app-launch-template", {
@@ -475,12 +584,15 @@ const launchTemplate = new aws.ec2.LaunchTemplate("web-app-launch-template", {
     instanceType: "t2.micro",
     keyName: keyPair,
     userData: userData,
-    securityGroupNames: [appSecurityGroup.name], // WebAppSecurityGroup
+    name: "csye6225_asg",  // Set the Launch Template Name
+    // securityGroupNames: [appSecurityGroup.name], // WebAppSecurityGroup
+    vpcSecurityGroupIds: [appSecurityGroup.id]
 });
 
 // Define Auto Scaling Group
 const autoScalingGroup = new aws.autoscaling.Group("web-app-auto-scaling-group", {
-    vpcZoneIdentifiers: pulumi.output(subnets).apply(subnets => subnets.map(subnet => subnet.vpcId)),  // Pass the array directly
+    vpcZoneIdentifiers: pulumi.output(subnets).apply(subnets => subnets.map(subnet => subnet.id)),  // Pass the array directly
+    cooldown: 60,  // Set the Cooldown to 60 seconds
     launchTemplate: {
         id: launchTemplate.id,
         version: "$Latest",
@@ -498,10 +610,14 @@ const autoScalingGroup = new aws.autoscaling.Group("web-app-auto-scaling-group",
             propagateAtLaunch: true,
         },
         // Add other tags as needed
+        {
+            key: "AutoScalingGroup",
+            value: "csye6225_asg",  // Set the AutoScalingGroup tag property
+            propagateAtLaunch: true,
+        },
     ],
     waitForCapacityTimeout: "0s", // No waiting for capacity
-});
-
+}as any);
 
 
 const scaleUpPolicy = new aws.autoscaling.Policy("web-app-scale-up-policy", {
@@ -548,6 +664,218 @@ const scaleDownAlarm = new aws.cloudwatch.MetricAlarm("web-app-scale-down-alarm"
     alarmActions: [scaleDownPolicy.arn],
 });
 
+// Create an Application Load Balancer
+const loadBalancer = new aws.lb.LoadBalancer("web-app-lb", {
+    internal: false,
+    loadBalancerType: "application",
+    securityGroups: [lbSecurityGroup.id],
+    enableDeletionProtection: false,
+    subnets: pulumi
+        .output(subnets)
+        .apply(subnets => subnets.filter((_, index) => index % 2 === 0).map(subnet => subnet.id)), // Select subnets from different Availability Zones
+});
+
+const availabilityZones = pulumi.output(subnets).apply(subnets => subnets.map(subnet => subnet.availabilityZone));
+
+// Create a target group for the auto-scaling group
+const targetGroup = new aws.lb.TargetGroup("web-app-target-group", {
+    port: 3000,
+    protocol: "HTTP",
+    targetType: "instance",
+    vpcId: vpc.id,
+    healthCheck: {
+        path: "/",
+        port: "traffic-port",
+    },
+    // targets: pulumi.output(availabilityZones).apply(azs =>
+    //     azs.map((az, index) => ({
+    //         targetId: pulumi.interpolate`web-app-auto-scaling-group-${index + 1}`,
+    //         availabilityZone: az,
+    //     }))
+    // ),
+});
+
+
+// Attach the target group to the auto-scaling group
+const attachment = new aws.lb.TargetGroupAttachment("web-app-target-group-attachment", {
+    targetGroupArn: targetGroup.arn,
+    targetId: ec2Instance.id, // Use a valid EC2 instance ID here
+});
+
+// Create an ALB listener to forward traffic to the target group
+const listener = new aws.lb.Listener("web-app-listener", {
+    loadBalancerArn: loadBalancer.arn,
+    port: 80,
+    defaultActions: [
+        {
+            type: "forward",
+            targetGroupArn: targetGroup.arn,
+        },
+    ],
+});
+
+
+// // Create an ALB listener to forward traffic to the target group
+// const listener = new aws.lb.Listener("web-app-listener", {
+//     loadBalancerArn: loadBalancer.arn,
+//     port: 80,
+//     defaultActions: [
+//         {
+//             type: "fixed-response",
+//             fixedResponse: {
+//                 contentType: "text/plain",
+//                 statusCode: "200",
+//                 messageBody: "OK",
+//             },
+//         },
+//     ],
+// });
+
+// Update Route53 record to point to the ALB
+// const albRecord = new aws.route53.Record("alb-record", {
+//     zoneId: hostedZoneId,
+//     name: domainName,
+//     type: "A",
+//     // ttl: 60,
+//     records: [loadBalancer.dnsName],  // Add this line to provide the records
+//     aliases: [{
+//         evaluateTargetHealth: true,
+//         name: loadBalancer.dnsName,
+//         zoneId: loadBalancer.zoneId,
+//     }],
+// });
+
+const albRecord = new aws.route53.Record("alb-record", {
+    zoneId: hostedZoneId,
+    name: domainName,
+    type: "A",
+    aliases: [{
+        evaluateTargetHealth: true,
+        name: loadBalancer.dnsName,
+        zoneId: loadBalancer.zoneId,
+    }],
+});
+
+
+// Export the ALB DNS name
+export const albDnsName = loadBalancer.dnsName;
+
+// // Attach the EC2 instances to the Target Group
+// const webAppTargetGroupAttachment = new alb.TargetGroupAttachment("web-app-tg-attachment", {
+//     targetGroupArn: webAppTargetGroup.arn,
+//     targetId: ec2Instance.id,
+//     port: 3000,
+// });
+
+// // Update Route53 to point to the ALB
+// const domainRecord = new route53.Record("web-app-dns", {
+//     zoneId: hostedZoneId,
+//     name: domainName,
+//     type: "A",
+//     ttl: pulumi.output(60).apply(v => parseInt(v, 10)),  // Convert string to number
+//     aliases: [{
+//         evaluateTargetHealth: true,
+//         name: webAppLoadBalancer.dnsName,
+//         zoneId: webAppLoadBalancer.zoneId,
+//     }],
+// });
+
+// Create a Google Cloud Storage bucket
+const gcsBucket = new gcp.storage.Bucket("my-gcs-bucket", {
+    location: "US",
+    storageClass: "STANDARD",
+});
+
+// Create a Google Service Account
+const serviceAccount = new gcp.serviceaccount.Account("my-service-account", {
+    accountId: "my-service-account", // Unique identifier for the service account
+    displayName: "My Service Account",
+});
+
+// Create Access Keys for the Google Service Account
+const serviceAccountKey = new gcp.serviceaccount.Key("my-service-account-key", {
+    serviceAccountId: serviceAccount.accountId,
+});
+
+// Create a DynamoDB table
+const dynamoDBTable = new aws.dynamodb.Table("my-dynamodb-table", {
+    attributes: [
+        {
+            name: "id",
+            type: "S",
+        },
+    ],
+    hashKey: "id",
+    readCapacity: 1,
+    writeCapacity: 1,
+});
+
+// Define IAM Role for Lambda Function
+const lambdaRole = new aws.iam.Role("lambdaRole", {
+    assumeRolePolicy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+            {
+                Action: "sts:AssumeRole",
+                Effect: "Allow",
+                Principal: {
+                    Service: "lambda.amazonaws.com",
+                },
+            },
+        ],
+    }),
+});
+
+// Define IAM Policy for DynamoDB Access
+const dynamoDBPolicy = new aws.iam.Policy("dynamoDBPolicy", {
+    policy: {
+        Version: "2012-10-17",
+        Statement: [
+            {
+                Action: [
+                    "dynamodb:Scan",
+                    "dynamodb:Query",
+                    "dynamodb:GetItem",
+                    "dynamodb:PutItem",
+                    "dynamodb:UpdateItem",
+                    "dynamodb:DeleteItem",
+                ],
+                Effect: "Allow",
+                Resource: dynamoDBTable.arn, // Use the DynamoDB table ARN created earlier
+            },
+        ],
+    },
+});
+
+// Attach the DynamoDB policy to the Lambda function
+const lambdaRolePolicyAttachment = new aws.iam.RolePolicyAttachment("lambdaRolePolicy", {
+    policyArn: dynamoDBPolicy.arn,
+    role: lambdaRole.name,
+});
+
+// Define your environment variables
+const lambdaEnvironment: { [key: string]: pulumi.Input<string> } = {
+    // GOOGLE_STORAGE_ACCESS_KEY: serviceAccountKey.privateKey,
+    // GOOGLE_STORAGE_SECRET_KEY: serviceAccountKey.publicKey,
+    // GOOGLE_STORAGE_BUCKET: gcsBucket.name,
+    MAILGUN_API_KEY: mailgunApiKey,
+    MAILGUN_DOMAIN: mailgunDomain,
+    MAILGUN_SENDER_EMAIL: mailgunSenderEmail,
+    // DYNAMODB_TABLE_NAME: dynamoDBTable.name,
+};
+
+// Create an AWS Lambda function
+const lambdaFunction = new aws.lambda.Function("my-lambda-function", {
+    runtime: "nodejs14.x",
+    handler: "index.handler",
+    timeout: 10,
+    role: lambdaRole.arn,
+    code: new pulumi.asset.AssetArchive({
+        ".": new pulumi.asset.FileArchive("../serverless"),
+    }),
+    environment: { variables: lambdaEnvironment },
+});
+
 // Export the security group ID
 export const securityGroupId = appSecurityGroup.id;
 export const internetGatewayId = internetGateway.id;
@@ -557,14 +885,24 @@ export const privateRouteTableId = privateRouteTable.id;
 export const publicIp = ec2Instance.publicIp;
 // Export the rds security group ID
 export const rdsSecurityGroupId = rdsSecurityGroup.id;
-// Export the DNS record information for reference
-export const domainRecordName = domainRecord.name;
-export const domainRecordType = domainRecord.type;
-export const domainRecordValue = domainRecord.records;
 // Export Auto Scaling Group details
 export const autoScalingGroupName = autoScalingGroup.name;
 export const autoScalingGroupDesiredCapacity = autoScalingGroup.desiredCapacity;
 export const autoScalingGroupMinSize = autoScalingGroup.minSize;
 export const autoScalingGroupMaxSize = autoScalingGroup.maxSize;
-
+// // Export the DNS record information for reference
+// export const domainRecordName = domainRecord.name;
+// export const domainRecordType = domainRecord.type;
+// export const domainRecordValue = pulumi.output(domainRecord.aliases).apply(aliases => (aliases && aliases.length > 0) ? aliases[0].name : undefined);
+// Export the GCS bucket name, Service Account ID, and Access Keys
+export const gcsBucketName = gcsBucket.name;
+export const serviceAccountId = serviceAccount.accountId;
+export const serviceAccountKeyId = serviceAccountKey.id;
+export const serviceAccountEmail = serviceAccount.email;
+// Export the Lambda function ARN
+export const lambdaFunctionArn = lambdaFunction.arn;
+// Export DynamoDB table name
+export const dynamoDBTableName = dynamoDBTable.name;
+// Export the Lambda Role ARN
+export const lambdaRoleArn = lambdaRole.arn;
 
