@@ -22,3 +22,7 @@ config:
   myfirstpulumi:vpcName: "MyVPC"
   myfirstpulumi:domainName: "demo.f23cloud.me"
   myfirstpulumi:hostedZoneId: "Z05004432YBDRSPRH0XO5"
+  myfirstpulumi:mailgunDomain: "f23cloud.me"
+  myfirstpulumi:mailgunApiKey: "516c85648c378e36f8e48b908239f8f2-30b58138-6cbb07b9"
+  myfirstpulumi:mailgunSenderEmail: "postmaster@f23cloud.me"
+  gcp:project: "dark-torch-406505"
